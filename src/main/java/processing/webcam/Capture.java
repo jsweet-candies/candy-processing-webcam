@@ -1,28 +1,23 @@
 package processing.webcam;
 
-import static def.dom.Globals.alert;
 import static def.dom.Globals.document;
 import static def.dom.Globals.navigator;
 import static jsweet.util.Lang.$map;
-import static jsweet.util.Lang.any;
-import static jsweet.util.Lang.await;
 import static jsweet.util.Lang.object;
 import static jsweet.util.StringTypes._2d;
 import static jsweet.util.StringTypes.canvas;
-import static jsweet.util.StringTypes.img;
 import static jsweet.util.StringTypes.video;
 
 import java.util.function.Consumer;
 
 import def.dom.CanvasRenderingContext2D;
-import def.dom.Event;
 import def.dom.HTMLCanvasElement;
-import def.dom.HTMLImageElement;
 import def.dom.HTMLVideoElement;
+import def.dom.ImageData;
 import def.js.Promise;
 import def.processing.core.PApplet;
+import def.processing.core.PConstants;
 import def.processing.core.PImage;
-import jsweet.lang.Async;
 
 public class Capture {
 
@@ -33,9 +28,14 @@ public class Capture {
 	private final PApplet applet;
 	public final int width;
 	public final int height;
+
 	private HTMLVideoElement videoElement;
 	private HTMLCanvasElement canvasElement;
 	private CanvasRenderingContext2D canvasContext;
+
+	private boolean available;
+
+	private PImage capturedImage;
 
 	public Capture(PApplet applet, int width, int height) {
 		this.applet = applet;
@@ -66,36 +66,49 @@ public class Capture {
 	}
 
 	public void drawOnApplet() {
+		ensureAvailable();
+
 		HTMLCanvasElement appletCanvas = applet.externals.canvas;
 		CanvasRenderingContext2D appletRenderingContext = appletCanvas.getContext(_2d);
 		appletRenderingContext.drawImage(videoElement, 0, 0);
 	}
-	
-	@Async
+
+	/**
+	 * Preload a PImage accessible after with this.get(int,int) using loadImage()
+	 * 
+	 * @see #get(int, int)
+	 * @see #loadImage()
+	 */
+	public void read() {
+		this.capturedImage = loadImage();
+	}
+
+	/**
+	 * Returns pixel at {x,y} of previously captured/read image, or 0 if no image
+	 * loaded.
+	 * 
+	 * @see #read()
+	 * @see PImage#get(int, int)
+	 */
+	public int get(int x, int y) {
+		if (capturedImage == null) {
+			return 0;
+		}
+
+		return this.capturedImage.get(x, y);
+	}
+
 	public PImage loadImage() {
-		HTMLImageElement imageElement = await(loadHtmlImage());
-		return new PImage(any(imageElement));
-	}
+		ensureAvailable();
 
-	public Promise<HTMLImageElement> loadHtmlImage() {
 		canvasContext.drawImage(videoElement, 0, 0);
-		HTMLImageElement image = document.createElement(img);
-		image.width = canvasElement.width;
-		image.height = canvasElement.height;
-		return new Promise<HTMLImageElement>((Consumer<HTMLImageElement> resolve, Consumer<Object> reject) -> {
-			image.onload = (Event __) -> {
-				resolve.accept(image);
-				return null;
-			};
-			image.onerror = (Event event) -> {
-				reject.accept(event);
-				return null;
-			};
-			image.src = canvasElement.toDataURL();
-		});
+		PImage image = applet.createImage(width, height, PConstants.ARGB);
+		ImageData imageData = canvasContext.getImageData(0, 0, width, height);
+		image.fromImageData(imageData);
+		return image;
 	}
 
-	public void init() {
+	public void start() {
 
 		if (videoElement.dataset.$get(INITIALIZED_DATA_ATTRIBUTE_NAME) != "true") {
 
@@ -116,20 +129,35 @@ public class Capture {
 	}
 
 	private void gotStream(Object stream) {
+		System.out.println("requesting video play");
 		videoElement.$set("srcObject", stream);
-		videoElement.onerror = (__) -> {
-			streamError();
+		videoElement.onerror = (error) -> {
+			streamError(error);
 
+			return null;
+		};
+		videoElement.onplay = (__) -> {
+			System.out.println("play started, video capture available");
+			available = true;
 			return null;
 		};
 	}
 
 	private void noStream(Object error) {
 		System.err.println("an error occurred while accessing camera: " + error);
-		alert("No camera available.");
 	}
 
-	private void streamError() {
-		alert("Camera error.");
+	private void streamError(Object error) {
+		System.err.println("an error occurred while streaming camera: " + error);
+	}
+
+	private void ensureAvailable() {
+		if (!available()) {
+			throw new Error("camera not available");
+		}
+	}
+
+	public boolean available() {
+		return available;
 	}
 }
