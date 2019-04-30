@@ -38,6 +38,10 @@ public class Capture {
 	private PImage capturedImage;
 
 	public Capture(PApplet applet, int width, int height) {
+		this(applet, width, height, null);
+	}
+
+	public Capture(PApplet applet, int width, int height, String[] requestedResolutions) {
 		this.applet = applet;
 		this.width = width;
 		this.height = height;
@@ -159,5 +163,12 @@ public class Capture {
 
 	public boolean available() {
 		return available;
+	}
+
+	/**
+	 * @return Only one value "unknown"
+	 */
+	public String[] list() {
+		return new String[] { "unknown" };
 	}
 }
