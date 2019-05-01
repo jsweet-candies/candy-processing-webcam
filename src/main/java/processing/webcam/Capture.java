@@ -2,6 +2,8 @@ package processing.webcam;
 
 import static def.dom.Globals.document;
 import static def.dom.Globals.navigator;
+import static def.js.Globals.isNaN;
+import static def.js.Globals.parseInt;
 import static jsweet.util.Lang.$map;
 import static jsweet.util.Lang.object;
 import static jsweet.util.StringTypes._2d;
@@ -15,11 +17,24 @@ import def.dom.HTMLCanvasElement;
 import def.dom.HTMLVideoElement;
 import def.dom.ImageData;
 import def.js.Promise;
+import def.js.RegExp;
+import def.js.RegExpExecArray;
 import def.processing.core.PApplet;
+import def.processing.core.PApplet.PImageLike;
 import def.processing.core.PConstants;
 import def.processing.core.PImage;
+import jsweet.lang.Interface;
 
-public class Capture {
+@Interface
+abstract class Dimension {
+	int width;
+	int height;
+}
+
+public class Capture extends PImageLike {
+
+	private static final int DEFAULT_WIDTH = 800;
+	private static final int DEFAULT_HEIGHT = 600;
 
 	private static final String CAPTURE_CANVAS_ELEMENT_ID = "ProcessingWebCam__captureCanvas";
 	private static final String VIDEO_ELEMENT_ID = "ProcessingWebCam__videoOutput";
@@ -37,11 +52,30 @@ public class Capture {
 
 	private PImage capturedImage;
 
+	/**
+	 * Last captured image's data
+	 * 
+	 * @see #read()
+	 */
+	public ImageData imageData;
+	
+	public ImageData toImageData() {
+		return imageData;
+	}
+
+	public Capture(PApplet applet, String dimension) {
+		this(applet, decodeDimension(dimension).width, decodeDimension(dimension).height);
+	}
+
 	public Capture(PApplet applet, int width, int height) {
 		this.applet = applet;
 		this.width = width;
 		this.height = height;
 
+		initDomElements();
+	}
+
+	private void initDomElements() {
 		videoElement = (HTMLVideoElement) document.getElementById(VIDEO_ELEMENT_ID);
 		if (videoElement == null) {
 			videoElement = document.createElement(video);
@@ -63,6 +97,33 @@ public class Capture {
 			document.body.appendChild(canvasElement);
 		}
 		canvasContext = canvasElement.getContext(_2d);
+		imageData = canvasContext.getImageData(0, 0, width, height);
+	}
+
+	private static Dimension decodeDimension(String dimensionString) {
+		Dimension dimension = new Dimension() {
+			{
+				width = DEFAULT_WIDTH;
+				height = DEFAULT_HEIGHT;
+			}
+		};
+
+		if (dimensionString != null) {
+			RegExp sizeRegExp = new RegExp("size=([0-9]+)x([0-9]+)", "g");
+			RegExpExecArray result = sizeRegExp.exec(dimensionString);
+			if (result.length > 2) {
+				int width = parseInt(result.$get(1));
+				if (!isNaN(width)) {
+					dimension.width = width;
+				}
+				int height = parseInt(result.$get(2));
+				if (!isNaN(height)) {
+					dimension.height = height;
+				}
+			}
+		}
+
+		return dimension;
 	}
 
 	public void drawOnApplet() {
@@ -81,6 +142,7 @@ public class Capture {
 	 */
 	public void read() {
 		this.capturedImage = loadImage();
+		this.imageData = capturedImage.toImageData();
 	}
 
 	/**
@@ -162,9 +224,9 @@ public class Capture {
 	}
 
 	/**
-	 * @return Only one value "unknown"
+	 * @return Only one value "name=Unknown,size=800x600,fps=30"
 	 */
-	public String[] list() {
-		return new String[] { "unknown" };
+	public static String[] list() {
+		return new String[] { "name=Unknown,size=800x600,fps=30" };
 	}
 }
