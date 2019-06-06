@@ -1,11 +1,14 @@
 package processing.webcam;
 
-import static def.dom.Globals.document;
-import static def.dom.Globals.navigator;
 import static def.js.Globals.isNaN;
 import static def.js.Globals.parseInt;
+import static def.processing.core.NativeFeatures.createDomElement;
+import static def.processing.core.NativeFeatures.getDomElementById;
+import static def.processing.core.NativeFeatures.getUserMedia;
+import static def.processing.core.NativeFeatures.queryDomElementBySelector;
+import static jsweet.util.Lang.$insert;
 import static jsweet.util.Lang.$map;
-import static jsweet.util.Lang.object;
+import static jsweet.util.Lang.await;
 import static jsweet.util.StringTypes._2d;
 import static jsweet.util.StringTypes.canvas;
 import static jsweet.util.StringTypes.video;
@@ -14,6 +17,7 @@ import java.util.function.Consumer;
 
 import def.dom.CanvasRenderingContext2D;
 import def.dom.HTMLCanvasElement;
+import def.dom.HTMLElement;
 import def.dom.HTMLVideoElement;
 import def.dom.ImageData;
 import def.js.Promise;
@@ -21,8 +25,8 @@ import def.js.RegExp;
 import def.js.RegExpExecArray;
 import def.processing.core.PApplet;
 import def.processing.core.PApplet.PImageLike;
-import def.processing.core.PConstants;
 import def.processing.core.PImage;
+import jsweet.lang.Async;
 import jsweet.lang.Interface;
 
 @Interface
@@ -31,6 +35,7 @@ abstract class Dimension {
 	int height;
 }
 
+// TODO : add finalizer!
 public class Capture extends PImageLike {
 
 	private static final int DEFAULT_WIDTH = 800;
@@ -50,15 +55,13 @@ public class Capture extends PImageLike {
 
 	private boolean available;
 
-	private PImage capturedImage;
-
 	/**
 	 * Last captured image's data
 	 * 
 	 * @see #read()
 	 */
 	public ImageData imageData;
-	
+
 	public ImageData toImageData() {
 		return imageData;
 	}
@@ -71,33 +74,38 @@ public class Capture extends PImageLike {
 		this.applet = applet;
 		this.width = width;
 		this.height = height;
-
-		initDomElements();
 	}
 
-	private void initDomElements() {
-		videoElement = (HTMLVideoElement) document.getElementById(VIDEO_ELEMENT_ID);
-		if (videoElement == null) {
-			videoElement = document.createElement(video);
+	@Async
+	private Promise<Void> initDomElements() {
+		System.out.println("initDomElements");
+		HTMLElement body = applet.nativeFeatures.invoke(queryDomElementBySelector, "body");
+		System.out.println("initDomElements - body=" + (body == null ? "null" : $insert("typeof body")));
+
+		videoElement = (HTMLVideoElement) applet.nativeFeatures.invoke(getDomElementById, VIDEO_ELEMENT_ID);
+		if (await(applet.nativeFeatures.resolve(videoElement)) == null) {
+			videoElement = applet.nativeFeatures.invoke(createDomElement, video);
 			videoElement.setAttribute("id", VIDEO_ELEMENT_ID);
 			videoElement.setAttribute("style", "display:none;");
 			videoElement.setAttribute("width", width + "px");
 			videoElement.setAttribute("height", height + "px");
 			videoElement.setAttribute("autoplay", "true");
-			document.body.appendChild(videoElement);
+			body.appendChild(videoElement);
 
 		}
-		canvasElement = (HTMLCanvasElement) document.getElementById(CAPTURE_CANVAS_ELEMENT_ID);
-		if (canvasElement == null) {
-			canvasElement = document.createElement(canvas);
+		canvasElement = (HTMLCanvasElement) applet.nativeFeatures.invoke(getDomElementById, CAPTURE_CANVAS_ELEMENT_ID);
+		if (await(applet.nativeFeatures.resolve(canvasElement)) == null) {
+			canvasElement = applet.nativeFeatures.invoke(createDomElement, canvas);
 			canvasElement.setAttribute("id", CAPTURE_CANVAS_ELEMENT_ID);
 			canvasElement.setAttribute("style", "display:none;");
 			canvasElement.setAttribute("width", width + "px");
 			canvasElement.setAttribute("height", height + "px");
-			document.body.appendChild(canvasElement);
+			body.appendChild(canvasElement);
 		}
 		canvasContext = canvasElement.getContext(_2d);
 		imageData = canvasContext.getImageData(0, 0, width, height);
+
+		return null;
 	}
 
 	private static Dimension decodeDimension(String dimensionString) {
@@ -126,14 +134,6 @@ public class Capture extends PImageLike {
 		return dimension;
 	}
 
-	public void drawOnApplet() {
-		ensureAvailable();
-
-		HTMLCanvasElement appletCanvas = applet.externals.canvas;
-		CanvasRenderingContext2D appletRenderingContext = appletCanvas.getContext(_2d);
-		appletRenderingContext.drawImage(videoElement, 0, 0);
-	}
-
 	/**
 	 * Preload a PImage accessible after with this.get(int,int) using loadImage()
 	 * 
@@ -141,8 +141,10 @@ public class Capture extends PImageLike {
 	 * @see #loadImage()
 	 */
 	public void read() {
-		this.capturedImage = loadImage();
-		this.imageData = capturedImage.toImageData();
+		ensureAvailable();
+
+		canvasContext.drawImage(videoElement, 0, 0);
+		this.imageData = canvasContext.getImageData(0, 0, width, height);
 	}
 
 	/**
@@ -153,40 +155,32 @@ public class Capture extends PImageLike {
 	 * @see PImage#get(int, int)
 	 */
 	public int get(int x, int y) {
-		if (capturedImage == null) {
+		if (imageData == null) {
 			return 0;
 		}
 
-		return this.capturedImage.get(x, y);
-	}
+		int pixelIndex = 4 * (x + y * width);
+		int red = (int) imageData.data[pixelIndex]; // red color
+		int green = (int) imageData.data[pixelIndex + 1]; // green color
+		int blue = (int) imageData.data[pixelIndex + 2]; // blue color
+		int alpha = (int) imageData.data[pixelIndex + 3]; // alpha
+		int pixelRgb = (red << 24) + (green << 16) + (blue << 8) + (alpha);
 
-	public PImage loadImage() {
-		ensureAvailable();
-
-		canvasContext.drawImage(videoElement, 0, 0);
-		PImage image = applet.createImage(width, height, PConstants.ARGB);
-		ImageData imageData = canvasContext.getImageData(0, 0, width, height);
-		image.fromImageData(imageData);
-		return image;
+		return pixelRgb;
 	}
 
 	public void start() {
+		if (videoElement == null || videoElement.dataset.$get(INITIALIZED_DATA_ATTRIBUTE_NAME) != "true") {
+			initDomElements() //
+					.then(__ -> {
+						Consumer<Object> gotStream = stream -> gotStream(stream);
+						Consumer<Object> noStream = error -> noStream(error);
+						Promise<Object> getUserMediaPromise = applet.nativeFeatures.invoke(getUserMedia,
+								$map("video", true));
+						getUserMediaPromise.then(gotStream).Catch(noStream);
 
-		if (videoElement.dataset.$get(INITIALIZED_DATA_ATTRIBUTE_NAME) != "true") {
-
-			def.js.Object mediaDevices = object(navigator).$get("mediaDevices");
-			if (mediaDevices == null || mediaDevices.$get("getUserMedia") == null) {
-				noStream("navigator.mediaDevices.getUserMedia not found");
-				return;
-			}
-
-			Consumer<Object> gotStream = stream -> gotStream(stream);
-			Consumer<Object> noStream = error -> noStream(error);
-			Promise<Object> getUserMediaPromise = mediaDevices //
-					.$invoke("getUserMedia", $map("video", true));
-			getUserMediaPromise.then(gotStream).Catch(noStream);
-
-			videoElement.dataset.$set(INITIALIZED_DATA_ATTRIBUTE_NAME, "true");
+						videoElement.dataset.$set(INITIALIZED_DATA_ATTRIBUTE_NAME, "true");
+					});
 		}
 	}
 
