@@ -3,11 +3,13 @@ package processing.webcam;
 import static def.js.Globals.isNaN;
 import static def.js.Globals.parseInt;
 import static def.processing.core.NativeFeatures.createDomElement;
+import static def.processing.core.NativeFeatures.freeObjectMemory;
 import static def.processing.core.NativeFeatures.getDomElementById;
 import static def.processing.core.NativeFeatures.getUserMedia;
 import static def.processing.core.NativeFeatures.queryDomElementBySelector;
 import static jsweet.util.Lang.$insert;
 import static jsweet.util.Lang.$map;
+import static jsweet.util.Lang.array;
 import static jsweet.util.Lang.await;
 import static jsweet.util.StringTypes._2d;
 import static jsweet.util.StringTypes.canvas;
@@ -20,6 +22,7 @@ import def.dom.HTMLCanvasElement;
 import def.dom.HTMLElement;
 import def.dom.HTMLVideoElement;
 import def.dom.ImageData;
+import def.dom.MediaStream;
 import def.js.Promise;
 import def.js.RegExp;
 import def.js.RegExpExecArray;
@@ -61,6 +64,7 @@ public class Capture extends PImageLike {
 	 * @see #read()
 	 */
 	public ImageData imageData;
+	private MediaStream mediaStream;
 
 	public ImageData toImageData() {
 		return imageData;
@@ -74,6 +78,28 @@ public class Capture extends PImageLike {
 		this.applet = applet;
 		this.width = width;
 		this.height = height;
+
+		applet.onExitListeners.add(exitedApplet -> this.releaseResources(exitedApplet));
+	}
+
+	@Async
+	private void releaseResources(PApplet exitedApplet) {
+		try {
+			array(mediaStream.getTracks()).forEach(track -> track.stop());
+		} catch (Exception e) {
+			e.printStackTrace();
+			System.err.println("cannot stop input media stream");
+		}
+
+		if (await(applet.nativeFeatures.resolve(canvasElement)) != null) {
+			canvasElement.remove();
+		}
+		if (await(applet.nativeFeatures.resolve(videoElement)) != null) {
+			videoElement.remove();
+		}
+		videoElement = null;
+		canvasElement = null;
+		canvasContext = null;
 	}
 
 	@Async
@@ -143,8 +169,19 @@ public class Capture extends PImageLike {
 	public void read() {
 		ensureAvailable();
 
+		releasePreviousImageData();
+
 		canvasContext.drawImage(videoElement, 0, 0);
 		this.imageData = canvasContext.getImageData(0, 0, width, height);
+	}
+
+	private void releasePreviousImageData() {
+		ImageData previousImageData = this.imageData;
+		applet.nativeFeatures.resolve(previousImageData).then((resolvedImageData) -> {
+			if (resolvedImageData != null) {
+				applet.nativeFeatures.invoke(freeObjectMemory, previousImageData);
+			}
+		});
 	}
 
 	/**
@@ -173,9 +210,9 @@ public class Capture extends PImageLike {
 		if (videoElement == null || videoElement.dataset.$get(INITIALIZED_DATA_ATTRIBUTE_NAME) != "true") {
 			initDomElements() //
 					.then(__ -> {
-						Consumer<Object> gotStream = stream -> gotStream(stream);
+						Consumer<MediaStream> gotStream = stream -> gotStream(stream);
 						Consumer<Object> noStream = error -> noStream(error);
-						Promise<Object> getUserMediaPromise = applet.nativeFeatures.invoke(getUserMedia,
+						Promise<MediaStream> getUserMediaPromise = applet.nativeFeatures.invoke(getUserMedia,
 								$map("video", true));
 						getUserMediaPromise.then(gotStream).Catch(noStream);
 
@@ -184,7 +221,8 @@ public class Capture extends PImageLike {
 		}
 	}
 
-	private void gotStream(Object stream) {
+	private void gotStream(MediaStream stream) {
+		this.mediaStream = stream;
 		System.out.println("requesting video play");
 		videoElement.$set("srcObject", stream);
 		videoElement.onerror = (error) -> {
