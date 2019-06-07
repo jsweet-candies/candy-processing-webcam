@@ -9,7 +9,6 @@ import static def.processing.core.NativeFeatures.getUserMedia;
 import static def.processing.core.NativeFeatures.queryDomElementBySelector;
 import static jsweet.util.Lang.$insert;
 import static jsweet.util.Lang.$map;
-import static jsweet.util.Lang.array;
 import static jsweet.util.Lang.await;
 import static jsweet.util.StringTypes._2d;
 import static jsweet.util.StringTypes.canvas;
@@ -23,6 +22,7 @@ import def.dom.HTMLElement;
 import def.dom.HTMLVideoElement;
 import def.dom.ImageData;
 import def.dom.MediaStream;
+import def.dom.MediaStreamTrack;
 import def.js.Promise;
 import def.js.RegExp;
 import def.js.RegExpExecArray;
@@ -38,8 +38,9 @@ abstract class Dimension {
 	int height;
 }
 
-// TODO : add finalizer!
 public class Capture extends PImageLike {
+
+	private static final boolean LOG_ENABLED = true;
 
 	private static final int DEFAULT_WIDTH = 800;
 	private static final int DEFAULT_HEIGHT = 600;
@@ -83,33 +84,62 @@ public class Capture extends PImageLike {
 	}
 
 	@Async
-	private void releaseResources(PApplet exitedApplet) {
-		try {
-			array(mediaStream.getTracks()).forEach(track -> track.stop());
-		} catch (Exception e) {
-			e.printStackTrace();
-			System.err.println("cannot stop input media stream");
+	private Promise<Void> releaseResources(PApplet exitedApplet) {
+		log("Capture : release resources");
+		if (mediaStream != null) {
+			try {
+				log("stopping input media stream");
+				MediaStreamTrack[] tracks = mediaStream.getTracks();
+				int nbTracks = await(applet.nativeFeatures.resolve(tracks.length));
+				log("stopping " + nbTracks + " tracks");
+				for (int i = 0 ;i < nbTracks; i++) {
+					log("stopping track " + (i));
+//					MediaStreamTrack track = await(applet.nativeFeatures.resolve(tracks[i]));
+					MediaStreamTrack track = tracks[i];
+					track.stop();
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+				System.err.println("cannot stop input media stream");
+			}
+		} else {
+			log("media stream wasn't started");
 		}
 
-		if (await(applet.nativeFeatures.resolve(canvasElement)) != null) {
+		if (canvasElement != null) {
+			log("removing canvas");
 			canvasElement.remove();
+		} else {
+			log("canvas not found");
 		}
-		if (await(applet.nativeFeatures.resolve(videoElement)) != null) {
+		if (videoElement != null) {
+			log("removing video element");
 			videoElement.remove();
+		} else {
+			log("video element not found");
 		}
 		videoElement = null;
 		canvasElement = null;
 		canvasContext = null;
+
+		return null;
+	}
+
+	private void log(String message) {
+		if (LOG_ENABLED) {
+			System.out.println(getClass().getSimpleName() + ": " + message);
+		}
 	}
 
 	@Async
 	private Promise<Void> initDomElements() {
-		System.out.println("initDomElements");
+		log("initDomElements");
 		HTMLElement body = applet.nativeFeatures.invoke(queryDomElementBySelector, "body");
-		System.out.println("initDomElements - body=" + (body == null ? "null" : $insert("typeof body")));
+		log("initDomElements - body=" + (body == null ? "null" : $insert("typeof body")));
 
 		videoElement = (HTMLVideoElement) applet.nativeFeatures.invoke(getDomElementById, VIDEO_ELEMENT_ID);
 		if (await(applet.nativeFeatures.resolve(videoElement)) == null) {
+			log("creating video element");
 			videoElement = applet.nativeFeatures.invoke(createDomElement, video);
 			videoElement.setAttribute("id", VIDEO_ELEMENT_ID);
 			videoElement.setAttribute("style", "display:none;");
@@ -118,15 +148,21 @@ public class Capture extends PImageLike {
 			videoElement.setAttribute("autoplay", "true");
 			body.appendChild(videoElement);
 
+		} else {
+			log("video element found");
 		}
 		canvasElement = (HTMLCanvasElement) applet.nativeFeatures.invoke(getDomElementById, CAPTURE_CANVAS_ELEMENT_ID);
 		if (await(applet.nativeFeatures.resolve(canvasElement)) == null) {
+			log("creating canvas element");
+
 			canvasElement = applet.nativeFeatures.invoke(createDomElement, canvas);
 			canvasElement.setAttribute("id", CAPTURE_CANVAS_ELEMENT_ID);
 			canvasElement.setAttribute("style", "display:none;");
 			canvasElement.setAttribute("width", width + "px");
 			canvasElement.setAttribute("height", height + "px");
 			body.appendChild(canvasElement);
+		} else {
+			log("canvas element found");
 		}
 		canvasContext = canvasElement.getContext(_2d);
 		imageData = canvasContext.getImageData(0, 0, width, height);
@@ -171,8 +207,12 @@ public class Capture extends PImageLike {
 
 		releasePreviousImageData();
 
-		canvasContext.drawImage(videoElement, 0, 0);
-		this.imageData = canvasContext.getImageData(0, 0, width, height);
+		if (started()) {
+			canvasContext.drawImage(videoElement, 0, 0);
+			this.imageData = canvasContext.getImageData(0, 0, width, height);
+		} else {
+			log("cannot read image - capture stopped");
+		}
 	}
 
 	private void releasePreviousImageData() {
@@ -216,25 +256,35 @@ public class Capture extends PImageLike {
 								$map("video", true));
 						getUserMediaPromise.then(gotStream).Catch(noStream);
 
-						videoElement.dataset.$set(INITIALIZED_DATA_ATTRIBUTE_NAME, "true");
+						if (started()) {
+							videoElement.dataset.$set(INITIALIZED_DATA_ATTRIBUTE_NAME, "true");
+						}
 					});
 		}
 	}
 
+	private boolean started() {
+		return videoElement != null && canvasElement != null;
+	}
+
 	private void gotStream(MediaStream stream) {
 		this.mediaStream = stream;
-		System.out.println("requesting video play");
-		videoElement.$set("srcObject", stream);
-		videoElement.onerror = (error) -> {
-			streamError(error);
+		log("requesting video play");
+		if (started()) {
+			videoElement.$set("srcObject", stream);
+			videoElement.onerror = (error) -> {
+				streamError(error);
 
-			return null;
-		};
-		videoElement.onplay = (__) -> {
-			System.out.println("play started, video capture available");
-			available = true;
-			return null;
-		};
+				return null;
+			};
+			videoElement.onplay = (__) -> {
+				log("play started, video capture available");
+				available = true;
+				return null;
+			};
+		} else {
+			streamError("capture was stopped");
+		}
 	}
 
 	private void noStream(Object error) {
