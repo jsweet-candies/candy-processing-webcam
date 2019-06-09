@@ -23,9 +23,11 @@ import def.dom.HTMLVideoElement;
 import def.dom.ImageData;
 import def.dom.MediaStream;
 import def.dom.MediaStreamTrack;
+import def.js.ArrayBuffer;
 import def.js.Promise;
 import def.js.RegExp;
 import def.js.RegExpExecArray;
+import def.js.Uint8Array;
 import def.processing.core.PApplet;
 import def.processing.core.PApplet.PImageLike;
 import def.processing.core.PImage;
@@ -66,6 +68,7 @@ public class Capture extends PImageLike {
 	 */
 	public ImageData imageData;
 	private MediaStream mediaStream;
+	private Uint8Array imageDataPixels;
 
 	public ImageData toImageData() {
 		return imageData;
@@ -92,9 +95,8 @@ public class Capture extends PImageLike {
 				MediaStreamTrack[] tracks = mediaStream.getTracks();
 				int nbTracks = await(applet.nativeFeatures.resolve(tracks.length));
 				log("stopping " + nbTracks + " tracks");
-				for (int i = 0 ;i < nbTracks; i++) {
+				for (int i = 0; i < nbTracks; i++) {
 					log("stopping track " + (i));
-//					MediaStreamTrack track = await(applet.nativeFeatures.resolve(tracks[i]));
 					MediaStreamTrack track = tracks[i];
 					track.stop();
 				}
@@ -202,6 +204,7 @@ public class Capture extends PImageLike {
 	 * @see #get(int, int)
 	 * @see #loadImage()
 	 */
+	@Async
 	public void read() {
 		ensureAvailable();
 
@@ -210,6 +213,8 @@ public class Capture extends PImageLike {
 		if (started()) {
 			canvasContext.drawImage(videoElement, 0, 0);
 			this.imageData = canvasContext.getImageData(0, 0, width, height);
+			ArrayBuffer imageDataPixelsBuffer = await(applet.nativeFeatures.resolve(this.imageData.data.buffer));
+			this.imageDataPixels = new Uint8Array(imageDataPixelsBuffer);
 		} else {
 			log("cannot read image - capture stopped");
 		}
@@ -231,17 +236,18 @@ public class Capture extends PImageLike {
 	 * @see #read()
 	 * @see PImage#get(int, int)
 	 */
+	@Async
 	public int get(int x, int y) {
 		if (imageData == null) {
 			return 0;
 		}
 
 		int pixelIndex = 4 * (x + y * width);
-		int red = (int) imageData.data[pixelIndex]; // red color
-		int green = (int) imageData.data[pixelIndex + 1]; // green color
-		int blue = (int) imageData.data[pixelIndex + 2]; // blue color
-		int alpha = (int) imageData.data[pixelIndex + 3]; // alpha
-		int pixelRgb = (red << 24) + (green << 16) + (blue << 8) + (alpha);
+		double red = imageDataPixels.$get(pixelIndex);
+		double green = imageDataPixels.$get(pixelIndex + 1);
+		double blue = imageDataPixels.$get(pixelIndex + 2);
+		double alpha = imageDataPixels.$get(pixelIndex + 3);
+		int pixelRgb = ((int) alpha << 24) + ((int) red << 16) + ((int) green << 8) + ((int) blue);
 
 		return pixelRgb;
 	}
