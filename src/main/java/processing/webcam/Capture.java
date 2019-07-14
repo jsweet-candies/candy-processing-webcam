@@ -70,6 +70,8 @@ public class Capture extends PImageLike {
 	private MediaStream mediaStream;
 	private Uint8Array imageDataPixels;
 
+	private boolean grabStarted;
+
 	public ImageData toImageData() {
 		return imageData;
 	}
@@ -88,11 +90,21 @@ public class Capture extends PImageLike {
 
 	@Async
 	private Promise<Void> releaseResources(PApplet exitedApplet) {
+		
+		MediaStream mediaStreamToRelease = mediaStream;
+		HTMLCanvasElement canvasElementToRelease = canvasElement;
+		HTMLVideoElement videoElementToRelease = videoElement;
+		
+		videoElement = null;
+		canvasElement = null;
+		canvasContext = null;
+		mediaStream= null;
+		
 		log("Capture : release resources");
-		if (mediaStream != null) {
+		if (mediaStreamToRelease != null) {
 			try {
 				log("stopping input media stream");
-				MediaStreamTrack[] tracks = mediaStream.getTracks();
+				MediaStreamTrack[] tracks = mediaStreamToRelease.getTracks();
 				int nbTracks = await(applet.nativeFeatures.resolve(tracks.length));
 				log("stopping " + nbTracks + " tracks");
 				for (int i = 0; i < nbTracks; i++) {
@@ -108,21 +120,18 @@ public class Capture extends PImageLike {
 			log("media stream wasn't started");
 		}
 
-		if (canvasElement != null) {
+		if (canvasElementToRelease != null) {
 			log("removing canvas");
-			canvasElement.remove();
+			canvasElementToRelease.remove();
 		} else {
 			log("canvas not found");
 		}
-		if (videoElement != null) {
+		if (videoElementToRelease != null) {
 			log("removing video element");
-			videoElement.remove();
+			videoElementToRelease.remove();
 		} else {
 			log("video element not found");
 		}
-		videoElement = null;
-		canvasElement = null;
-		canvasContext = null;
 
 		return null;
 	}
@@ -204,12 +213,26 @@ public class Capture extends PImageLike {
 	 * @see #get(int, int)
 	 * @see #loadImage()
 	 */
-	@Async
 	public void read() {
 		ensureAvailable();
+		
+		if (!grabStarted) {
+			grab();
+		}
+	}
 
+	@Async
+	private void grab() {
+		while (started()) {
+			grabStarted = true;
+			await(readNextFrame());
+		}
+	}
+
+	@Async
+	private Promise<Void> readNextFrame() {
 		releasePreviousImageData();
-
+		
 		if (started()) {
 			canvasContext.drawImage(videoElement, 0, 0);
 			this.imageData = canvasContext.getImageData(0, 0, width, height);
@@ -218,6 +241,8 @@ public class Capture extends PImageLike {
 		} else {
 			log("cannot read image - capture stopped");
 		}
+		
+		return null;
 	}
 
 	private void releasePreviousImageData() {
