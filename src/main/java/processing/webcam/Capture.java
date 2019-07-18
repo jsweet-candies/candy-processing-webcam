@@ -176,7 +176,7 @@ public class Capture extends PImageLike {
 			log("canvas element found");
 		}
 		canvasContext = canvasElement.getContext(_2d);
-		imageData = canvasContext.getImageData(0, 0, width, height);
+		await(readImageFromCanvas());
 
 		return null;
 	}
@@ -235,12 +235,19 @@ public class Capture extends PImageLike {
 		
 		if (started()) {
 			canvasContext.drawImage(videoElement, 0, 0);
-			this.imageData = canvasContext.getImageData(0, 0, width, height);
-			ArrayBuffer imageDataPixelsBuffer = await(applet.nativeFeatures.resolve(this.imageData.data.buffer));
-			this.imageDataPixels = new Uint8Array(imageDataPixelsBuffer);
+			await(readImageFromCanvas());
 		} else {
 			log("cannot read image - capture stopped");
 		}
+		
+		return null;
+	}
+
+	@Async
+	private Void readImageFromCanvas() {
+		this.imageData = canvasContext.getImageData(0, 0, width, height);
+		ArrayBuffer imageDataPixelsBuffer = await(applet.nativeFeatures.resolve(this.imageData.data.buffer));
+		this.imageDataPixels = new Uint8Array(imageDataPixelsBuffer);
 		
 		return null;
 	}
