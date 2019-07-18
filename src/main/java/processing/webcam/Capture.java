@@ -1,5 +1,6 @@
 package processing.webcam;
 
+import static def.dom.Globals.window;
 import static def.js.Globals.isNaN;
 import static def.js.Globals.parseInt;
 import static def.processing.core.NativeFeatures.createDomElement;
@@ -81,6 +82,8 @@ public class Capture extends PImageLike {
 
 	private boolean grabStarted;
 
+	private boolean isWorker;
+
 	/**
 	 * @see #imageData
 	 */
@@ -96,6 +99,9 @@ public class Capture extends PImageLike {
 		this.applet = applet;
 		this.width = width;
 		this.height = height;
+
+		this.isWorker = window.$get("WorkerGlobalScope") != null;
+		System.out.println("instantiating Capture - isWorker=" + isWorker);
 
 		applet.onExitListeners.add(exitedApplet -> this.releaseResources(exitedApplet));
 	}
@@ -225,11 +231,16 @@ public class Capture extends PImageLike {
 	 * @see #get(int, int)
 	 * @see #loadImage()
 	 */
+	@Async
 	public void read() {
 		ensureAvailable();
 
-		if (!grabStarted) {
-			grab();
+		if (isWorker) {
+			if (!grabStarted) {
+				grab();
+			}
+		} else {
+			await(readNextFrame());
 		}
 	}
 
@@ -261,7 +272,7 @@ public class Capture extends PImageLike {
 		ArrayBuffer imageDataPixelsBuffer = await(applet.nativeFeatures.resolve(this.capturedImageData.data.buffer));
 		this.imageDataPixels = new Uint8Array(imageDataPixelsBuffer);
 		this.imageData = new ImageData(new Uint8ClampedArray(imageDataPixelsBuffer), width, height);
-		
+
 		return null;
 	}
 
