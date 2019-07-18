@@ -28,6 +28,7 @@ import def.js.Promise;
 import def.js.RegExp;
 import def.js.RegExpExecArray;
 import def.js.Uint8Array;
+import def.js.Uint8ClampedArray;
 import def.processing.core.PApplet;
 import def.processing.core.PApplet.PImageLike;
 import def.processing.core.PImage;
@@ -62,16 +63,27 @@ public class Capture extends PImageLike {
 	private boolean available;
 
 	/**
-	 * Last captured image's data
+	 * Last captured image's data, fully resolved in thread's memory
 	 * 
 	 * @see #read()
 	 */
 	public ImageData imageData;
+
+	/**
+	 * Last captured image's data from canvas, which can be a proxy if in worker
+	 * context.
+	 * 
+	 * @see ImageData
+	 */
+	private ImageData capturedImageData;
 	private MediaStream mediaStream;
 	private Uint8Array imageDataPixels;
 
 	private boolean grabStarted;
 
+	/**
+	 * @see #imageData
+	 */
 	public ImageData toImageData() {
 		return imageData;
 	}
@@ -90,16 +102,16 @@ public class Capture extends PImageLike {
 
 	@Async
 	private Promise<Void> releaseResources(PApplet exitedApplet) {
-		
+
 		MediaStream mediaStreamToRelease = mediaStream;
 		HTMLCanvasElement canvasElementToRelease = canvasElement;
 		HTMLVideoElement videoElementToRelease = videoElement;
-		
+
 		videoElement = null;
 		canvasElement = null;
 		canvasContext = null;
-		mediaStream= null;
-		
+		mediaStream = null;
+
 		log("Capture : release resources");
 		if (mediaStreamToRelease != null) {
 			try {
@@ -215,7 +227,7 @@ public class Capture extends PImageLike {
 	 */
 	public void read() {
 		ensureAvailable();
-		
+
 		if (!grabStarted) {
 			grab();
 		}
@@ -232,28 +244,29 @@ public class Capture extends PImageLike {
 	@Async
 	private Promise<Void> readNextFrame() {
 		releasePreviousImageData();
-		
+
 		if (started()) {
 			canvasContext.drawImage(videoElement, 0, 0);
 			await(readImageFromCanvas());
 		} else {
 			log("cannot read image - capture stopped");
 		}
-		
+
 		return null;
 	}
 
 	@Async
 	private Void readImageFromCanvas() {
-		this.imageData = canvasContext.getImageData(0, 0, width, height);
-		ArrayBuffer imageDataPixelsBuffer = await(applet.nativeFeatures.resolve(this.imageData.data.buffer));
+		this.capturedImageData = canvasContext.getImageData(0, 0, width, height);
+		ArrayBuffer imageDataPixelsBuffer = await(applet.nativeFeatures.resolve(this.capturedImageData.data.buffer));
 		this.imageDataPixels = new Uint8Array(imageDataPixelsBuffer);
+		this.imageData = new ImageData(new Uint8ClampedArray(imageDataPixelsBuffer), width, height);
 		
 		return null;
 	}
 
 	private void releasePreviousImageData() {
-		ImageData previousImageData = this.imageData;
+		ImageData previousImageData = this.capturedImageData;
 		applet.nativeFeatures.resolve(previousImageData).then((resolvedImageData) -> {
 			if (resolvedImageData != null) {
 				applet.nativeFeatures.invoke(freeObjectMemory, previousImageData);
