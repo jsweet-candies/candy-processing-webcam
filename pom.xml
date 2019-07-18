@@ -101,30 +101,6 @@
 			</plugin>
 
 			<plugin>
-				<artifactId>maven-antrun-plugin</artifactId>
-				<executions>
-					<execution>
-						<phase>package</phase>
-						<configuration>
-							<target>
-								<echo message="copying generated bundles to dist..." />
-
-								<mkdir dir="dist/"></mkdir>
-
-								<copy
-									file="src/main/resources/META-INF/resources/typings/${project.artifactId}/${project.version}/bundle.d.ts"
-									tofile="dist/${project.artifactId}.d.ts" verbose="true"
-									failonerror="false" />
-							</target>
-						</configuration>
-						<goals>
-							<goal>run</goal>
-						</goals>
-					</execution>
-				</executions>
-			</plugin>
-
-			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-source-plugin</artifactId>
 				<executions>
